@@ -109,7 +109,7 @@
 <body>
 
   <h1>Controle de Retornos ao Galpão</h1>
-  <p>Identifica cargas no piso: volumes que não aparecem nos bipes do WhatsApp e não têm rota criada hoje.</p>
+  <p>Identifica volumes da planilha que não aparecem nos bipes enviados pelo WhatsApp.</p>
 
   <div class="card">
     <label>Planilha da rota / insucessos</label>
@@ -118,7 +118,7 @@
     <label>Cole aqui os códigos bipados no WhatsApp</label>
     <textarea id="codigosWhatsApp" placeholder="Cole aqui o texto ou os códigos do WhatsApp"></textarea>
 
-    <button onclick="analisar()">Analisar Cargas no Piso</button>
+    <button onclick="analisar()">Analisar Retornos</button>
     <button onclick="exportarExcel()">Exportar Resultado</button>
   </div>
 
@@ -126,7 +126,7 @@
     <div class="box">Total na planilha: <span id="totalPlanilha">0</span></div>
     <div class="box">Considerados na análise: <span id="totalConsiderados">0</span></div>
     <div class="box">Bipados no WhatsApp: <span id="totalBipados">0</span></div>
-    <div class="box">Cargas no piso: <span id="totalNaoRetornaram">0</span></div>
+    <div class="box">Não retornaram: <span id="totalNaoRetornaram">0</span></div>
   </div>
 
   <div class="card">
@@ -135,295 +135,279 @@
   </div>
 
   <div class="card">
-    <h2>Cargas no piso sem rota criada hoje</h2>
+    <h2>Volumes que NÃO aparecem no WhatsApp</h2>
     <div id="resultado"></div>
   </div>
 
-<script>
-let resultadoFinal = [];
+  <script>
+    let resultadoFinal = [];
 
-const statusIgnorar = [
-  "fechado",
-  "fechada",
-  "planejada",
-  "em rota"
-];
+    const statusIgnorar = [
+      "fechado",
+      "fechada",
+      "planejada",
+      "em rota"
+    ];
 
-function normalizarTexto(valor) {
-  return String(valor || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-}
-
-function limparCodigo(valor) {
-  return String(valor || "")
-    .replace(/\D/g, "")
-    .trim();
-}
-
-function formatarDataBR(data) {
-  return String(data || "").trim().split(" ")[0];
-}
-
-function dataHojeBR() {
-  const hoje = new Date();
-  const dia = String(hoje.getDate()).padStart(2, "0");
-  const mes = String(hoje.getMonth() + 1).padStart(2, "0");
-  const ano = hoje.getFullYear();
-  return `${dia}/${mes}/${ano}`;
-}
-
-function temRotaCriadaHoje(dataRota) {
-  return formatarDataBR(dataRota) === dataHojeBR();
-}
-
-function extrairCodigosWhatsApp(texto) {
-  const encontrados = texto.match(/\b\d{10,20}\b/g) || [];
-  return new Set(encontrados.map(codigo => limparCodigo(codigo)));
-}
-
-function lerPlanilha(arquivo) {
-  return new Promise((resolve, reject) => {
-    const leitor = new FileReader();
-
-    leitor.onload = function(e) {
-      try {
-        const dados = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(dados, { type: "array" });
-        const primeiraAba = workbook.SheetNames[0];
-        const planilha = workbook.Sheets[primeiraAba];
-        const json = XLSX.utils.sheet_to_json(planilha, { defval: "" });
-        resolve(json);
-      } catch (erro) {
-        reject(erro);
-      }
-    };
-
-    leitor.onerror = reject;
-    leitor.readAsArrayBuffer(arquivo);
-  });
-}
-
-function encontrarCampo(linha, nomesPossiveis) {
-  const chaves = Object.keys(linha);
-
-  for (const nome of nomesPossiveis) {
-    const encontrado = chaves.find(chave =>
-      normalizarTexto(chave) === normalizarTexto(nome)
-    );
-
-    if (encontrado) {
-      return linha[encontrado];
+    function normalizarTexto(valor) {
+      return String(valor || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .trim();
     }
-  }
 
-  return "";
-}
+    function limparCodigo(valor) {
+      return String(valor || "")
+        .replace(/\D/g, "")
+        .trim();
+    }
 
-async function analisar() {
-  const arquivo = document.getElementById("arquivoPlanilha").files[0];
-  const textoWhatsApp = document.getElementById("codigosWhatsApp").value;
+    function extrairCodigosWhatsApp(texto) {
+      const encontrados = texto.match(/\b\d{10,20}\b/g) || [];
+      return new Set(encontrados.map(codigo => limparCodigo(codigo)));
+    }
 
-  if (!arquivo) {
-    alert("Selecione a planilha primeiro.");
-    return;
-  }
+    function lerPlanilha(arquivo) {
+      return new Promise((resolve, reject) => {
+        const leitor = new FileReader();
 
-  if (!textoWhatsApp.trim()) {
-    alert("Cole os códigos bipados do WhatsApp.");
-    return;
-  }
+        leitor.onload = function(e) {
+          try {
+            const dados = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(dados, { type: "array" });
+            const primeiraAba = workbook.SheetNames[0];
+            const planilha = workbook.Sheets[primeiraAba];
+            const json = XLSX.utils.sheet_to_json(planilha, { defval: "" });
+            resolve(json);
+          } catch (erro) {
+            reject(erro);
+          }
+        };
 
-  const dados = await lerPlanilha(arquivo);
-  const codigosBipados = extrairCodigosWhatsApp(textoWhatsApp);
+        leitor.onerror = reject;
+        leitor.readAsArrayBuffer(arquivo);
+      });
+    }
 
-  resultadoFinal = [];
+    function encontrarCampo(linha, nomesPossiveis) {
+      const chaves = Object.keys(linha);
 
-  dados.forEach(linha => {
-    const status = encontrarCampo(linha, ["Status"]);
-    const statusNormalizado = normalizarTexto(status);
+      for (const nome of nomesPossiveis) {
+        const encontrado = chaves.find(chave =>
+          normalizarTexto(chave) === normalizarTexto(nome)
+        );
 
-    const volume = limparCodigo(
-      encontrarCampo(linha, [
-        "Código do volume",
-        "Codigo do volume",
-        "Volume",
-        "Codigo Volume",
-        "Código Volume"
-      ])
-    );
+        if (encontrado) {
+          return linha[encontrado];
+        }
+      }
 
-    const pedido = encontrarCampo(linha, ["Pedido"]);
-    const nf = encontrarCampo(linha, ["NF"]);
-    const entregador = encontrarCampo(linha, ["Nome Entregador", "Entregador"]);
-    const cpfEntregador = encontrarCampo(linha, ["CPF Entregador", "CPF"]);
-    const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
-    const motivo = encontrarCampo(linha, ["Motivo"]);
-    const destino = encontrarCampo(linha, ["Destino"]);
-    const bairro = encontrarCampo(linha, ["Bairro"]);
-    const cidade = encontrarCampo(linha, ["Cidade"]);
+      return "";
+    }
 
-    if (!volume) return;
-    if (statusIgnorar.includes(statusNormalizado)) return;
+    async function analisar() {
+      const arquivo = document.getElementById("arquivoPlanilha").files[0];
+      const textoWhatsApp = document.getElementById("codigosWhatsApp").value;
 
-    const foiBipado = codigosBipados.has(volume);
-    const rotaCriadaHoje = temRotaCriadaHoje(dataRota);
+      if (!arquivo) {
+        alert("Selecione a planilha primeiro.");
+        return;
+      }
 
-    if (foiBipado) return;
-    if (rotaCriadaHoje) return;
+      if (!textoWhatsApp.trim()) {
+        alert("Cole os códigos bipados do WhatsApp.");
+        return;
+      }
 
-    resultadoFinal.push({
-      "Código do volume": volume,
-      "Pedido": pedido,
-      "NF": nf,
-      "Nome Entregador": entregador,
-      "CPF Entregador": cpfEntregador,
-      "Data da Rota": dataRota,
-      "Rota criada hoje": rotaCriadaHoje ? "Sim" : "Não",
-      "Status": status,
-      "Motivo": motivo,
-      "Destino": destino,
-      "Bairro": bairro,
-      "Cidade": cidade,
-      "Ação": "Carga no piso - sem rota criada hoje"
-    });
-  });
+      const dados = await lerPlanilha(arquivo);
+      const codigosBipados = extrairCodigosWhatsApp(textoWhatsApp);
 
-  document.getElementById("totalPlanilha").innerText = dados.length;
-  document.getElementById("totalBipados").innerText = codigosBipados.size;
+      resultadoFinal = [];
 
-  const considerados = dados.filter(linha => {
-    const status = normalizarTexto(encontrarCampo(linha, ["Status"]));
-    const volume = limparCodigo(
-      encontrarCampo(linha, [
-        "Código do volume",
-        "Codigo do volume",
-        "Volume",
-        "Codigo Volume",
-        "Código Volume"
-      ])
-    );
+      dados.forEach(linha => {
+        const status = encontrarCampo(linha, ["Status"]);
+        const statusNormalizado = normalizarTexto(status);
 
-    const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
-    const rotaCriadaHoje = temRotaCriadaHoje(dataRota);
+        const volume = limparCodigo(
+          encontrarCampo(linha, [
+            "Código do volume",
+            "Codigo do volume",
+            "Volume",
+            "Codigo Volume",
+            "Código Volume"
+          ])
+        );
 
-    return volume && !statusIgnorar.includes(status) && !rotaCriadaHoje;
-  });
+        const pedido = encontrarCampo(linha, ["Pedido"]);
+        const nf = encontrarCampo(linha, ["NF"]);
+        const entregador = encontrarCampo(linha, ["Nome Entregador", "Entregador"]);
+        const cpfEntregador = encontrarCampo(linha, ["CPF Entregador", "CPF"]);
+        const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
+        const motivo = encontrarCampo(linha, ["Motivo"]);
+        const destino = encontrarCampo(linha, ["Destino"]);
+        const bairro = encontrarCampo(linha, ["Bairro"]);
+        const cidade = encontrarCampo(linha, ["Cidade"]);
 
-  document.getElementById("totalConsiderados").innerText = considerados.length;
-  document.getElementById("totalNaoRetornaram").innerText = resultadoFinal.length;
+        if (!volume) return;
 
-  montarTabelaResultado();
-  montarResumoEntregador();
-}
+        if (statusIgnorar.includes(statusNormalizado)) return;
 
-function montarTabelaResultado() {
-  const div = document.getElementById("resultado");
+        const foiBipado = codigosBipados.has(volume);
 
-  if (resultadoFinal.length === 0) {
-    div.innerHTML = "<p class='ok'>Nenhuma carga no piso sem rota criada hoje.</p>";
-    return;
-  }
+        if (!foiBipado) {
+          resultadoFinal.push({
+            "Código do volume": volume,
+            "Pedido": pedido,
+            "NF": nf,
+            "Nome Entregador": entregador,
+            "CPF Entregador": cpfEntregador,
+            "Data da Rota": dataRota,
+            "Status": status,
+            "Motivo": motivo,
+            "Destino": destino,
+            "Bairro": bairro,
+            "Cidade": cidade,
+            "Ação": "Cobrar retorno ao galpão"
+          });
+        }
+      });
 
-  let html = `
-    <table>
-      <thead>
-        <tr>
-          <th>Código do volume</th>
-          <th>Pedido</th>
-          <th>NF</th>
-          <th>Entregador</th>
-          <th>Data da Rota</th>
-          <th>Rota criada hoje</th>
-          <th>Status</th>
-          <th>Motivo</th>
-          <th>Bairro</th>
-          <th>Cidade</th>
-          <th>Ação</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
+      document.getElementById("totalPlanilha").innerText = dados.length;
+      document.getElementById("totalBipados").innerText = codigosBipados.size;
 
-  resultadoFinal.forEach(item => {
-    html += `
-      <tr>
-        <td>${item["Código do volume"]}</td>
-        <td>${item["Pedido"]}</td>
-        <td>${item["NF"]}</td>
-        <td>${item["Nome Entregador"]}</td>
-        <td>${item["Data da Rota"]}</td>
-        <td>${item["Rota criada hoje"]}</td>
-        <td>${item["Status"]}</td>
-        <td>${item["Motivo"]}</td>
-        <td>${item["Bairro"]}</td>
-        <td>${item["Cidade"]}</td>
-        <td>${item["Ação"]}</td>
-      </tr>
-    `;
-  });
+      const considerados = dados.filter(linha => {
+        const status = normalizarTexto(encontrarCampo(linha, ["Status"]));
+        const volume = limparCodigo(
+          encontrarCampo(linha, [
+            "Código do volume",
+            "Codigo do volume",
+            "Volume",
+            "Codigo Volume",
+            "Código Volume"
+          ])
+        );
 
-  html += "</tbody></table>";
-  div.innerHTML = html;
-}
+        return volume && !statusIgnorar.includes(status);
+      });
 
-function montarResumoEntregador() {
-  const div = document.getElementById("resumoEntregador");
+      document.getElementById("totalConsiderados").innerText = considerados.length;
+      document.getElementById("totalNaoRetornaram").innerText = resultadoFinal.length;
 
-  if (resultadoFinal.length === 0) {
-    div.innerHTML = "<p class='ok'>Nenhum entregador com carga no piso.</p>";
-    return;
-  }
+      montarTabelaResultado();
+      montarResumoEntregador();
+    }
 
-  const resumo = {};
+    function montarTabelaResultado() {
+      const div = document.getElementById("resultado");
 
-  resultadoFinal.forEach(item => {
-    const nome = item["Nome Entregador"] || "Sem entregador";
-    resumo[nome] = (resumo[nome] || 0) + 1;
-  });
+      if (resultadoFinal.length === 0) {
+        div.innerHTML = "<p class='ok'>Todos os volumes considerados aparecem no WhatsApp.</p>";
+        return;
+      }
 
-  let html = `
-    <table>
-      <thead>
-        <tr>
-          <th>Entregador</th>
-          <th>Cargas no piso</th>
-        </tr>
-      </thead>
-      <tbody>
-  `;
-
-  Object.entries(resumo)
-    .sort((a, b) => b[1] - a[1])
-    .forEach(([entregador, total]) => {
-      html += `
-        <tr>
-          <td>${entregador}</td>
-          <td>${total}</td>
-        </tr>
+      let html = `
+        <table>
+          <thead>
+            <tr>
+              <th>Código do volume</th>
+              <th>Pedido</th>
+              <th>NF</th>
+              <th>Entregador</th>
+              <th>Data da Rota</th>
+              <th>Status</th>
+              <th>Motivo</th>
+              <th>Bairro</th>
+              <th>Cidade</th>
+              <th>Ação</th>
+            </tr>
+          </thead>
+          <tbody>
       `;
-    });
 
-  html += "</tbody></table>";
-  div.innerHTML = html;
-}
+      resultadoFinal.forEach(item => {
+        html += `
+          <tr>
+            <td>${item["Código do volume"]}</td>
+            <td>${item["Pedido"]}</td>
+            <td>${item["NF"]}</td>
+            <td>${item["Nome Entregador"]}</td>
+            <td>${item["Data da Rota"]}</td>
+            <td>${item["Status"]}</td>
+            <td>${item["Motivo"]}</td>
+            <td>${item["Bairro"]}</td>
+            <td>${item["Cidade"]}</td>
+            <td>${item["Ação"]}</td>
+          </tr>
+        `;
+      });
 
-function exportarExcel() {
-  if (resultadoFinal.length === 0) {
-    alert("Não há resultado para exportar.");
-    return;
-  }
+      html += `
+          </tbody>
+        </table>
+      `;
 
-  const ws = XLSX.utils.json_to_sheet(resultadoFinal);
-  const wb = XLSX.utils.book_new();
+      div.innerHTML = html;
+    }
 
-  XLSX.utils.book_append_sheet(wb, ws, "Cargas no Piso");
+    function montarResumoEntregador() {
+      const div = document.getElementById("resumoEntregador");
 
-  XLSX.writeFile(wb, "cargas_no_piso_sem_rota_hoje.xlsx");
-}
-</script>
+      if (resultadoFinal.length === 0) {
+        div.innerHTML = "<p class='ok'>Nenhum entregador com pendência de retorno.</p>";
+        return;
+      }
+
+      const resumo = {};
+
+      resultadoFinal.forEach(item => {
+        const nome = item["Nome Entregador"] || "Sem entregador";
+        resumo[nome] = (resumo[nome] || 0) + 1;
+      });
+
+      let html = `
+        <table>
+          <thead>
+            <tr>
+              <th>Entregador</th>
+              <th>Volumes não retornados</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      Object.entries(resumo)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([entregador, total]) => {
+          html += `
+            <tr>
+              <td>${entregador}</td>
+              <td>${total}</td>
+            </tr>
+          `;
+        });
+
+      html += `
+          </tbody>
+        </table>
+      `;
+
+      div.innerHTML = html;
+    }
+
+    function exportarExcel() {
+      if (resultadoFinal.length === 0) {
+        alert("Não há resultado para exportar.");
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(resultadoFinal);
+      const wb = XLSX.utils.book_new();
+
+      XLSX.utils.book_append_sheet(wb, ws, "Nao Retornaram");
+      XLSX.writeFile(wb, "controle_retornos_nao_bipados.xlsx");
+    }
+  </script>
 
 </body>
 </html>
