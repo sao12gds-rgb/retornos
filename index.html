@@ -109,7 +109,7 @@
 <body>
 
   <h1>Controle de Retornos ao Galpão</h1>
-  <p>Identifica volumes da planilha que não aparecem nos bipes enviados pelo WhatsApp.</p>
+  <p>Identifica cargas no piso: volumes que não aparecem nos bipes do WhatsApp e não têm rota criada hoje.</p>
 
   <div class="card">
     <label>Planilha da rota / insucessos</label>
@@ -118,7 +118,7 @@
     <label>Cole aqui os códigos bipados no WhatsApp</label>
     <textarea id="codigosWhatsApp" placeholder="Cole aqui o texto ou os códigos do WhatsApp"></textarea>
 
-    <button onclick="analisar()">Analisar Retornos</button>
+    <button onclick="analisar()">Analisar Cargas no Piso</button>
     <button onclick="exportarExcel()">Exportar Resultado</button>
   </div>
 
@@ -126,7 +126,7 @@
     <div class="box">Total na planilha: <span id="totalPlanilha">0</span></div>
     <div class="box">Considerados na análise: <span id="totalConsiderados">0</span></div>
     <div class="box">Bipados no WhatsApp: <span id="totalBipados">0</span></div>
-    <div class="box">Não retornaram: <span id="totalNaoRetornaram">0</span></div>
+    <div class="box">Cargas no piso: <span id="totalNaoRetornaram">0</span></div>
   </div>
 
   <div class="card">
@@ -135,7 +135,7 @@
   </div>
 
   <div class="card">
-    <h2>Volumes que NÃO aparecem no WhatsApp</h2>
+    <h2>Cargas no piso sem rota criada hoje</h2>
     <div id="resultado"></div>
   </div>
 
@@ -161,6 +161,22 @@ function limparCodigo(valor) {
   return String(valor || "")
     .replace(/\D/g, "")
     .trim();
+}
+
+function formatarDataBR(data) {
+  return String(data || "").trim().split(" ")[0];
+}
+
+function dataHojeBR() {
+  const hoje = new Date();
+  const dia = String(hoje.getDate()).padStart(2, "0");
+  const mes = String(hoje.getMonth() + 1).padStart(2, "0");
+  const ano = hoje.getFullYear();
+  return `${dia}/${mes}/${ano}`;
+}
+
+function temRotaCriadaHoje(dataRota) {
+  return formatarDataBR(dataRota) === dataHojeBR();
 }
 
 function extrairCodigosWhatsApp(texto) {
@@ -253,23 +269,26 @@ async function analisar() {
     if (statusIgnorar.includes(statusNormalizado)) return;
 
     const foiBipado = codigosBipados.has(volume);
+    const rotaCriadaHoje = temRotaCriadaHoje(dataRota);
 
-    if (!foiBipado) {
-      resultadoFinal.push({
-        "Código do volume": volume,
-        "Pedido": pedido,
-        "NF": nf,
-        "Nome Entregador": entregador,
-        "CPF Entregador": cpfEntregador,
-        "Data da Rota": dataRota,
-        "Status": status,
-        "Motivo": motivo,
-        "Destino": destino,
-        "Bairro": bairro,
-        "Cidade": cidade,
-        "Ação": "Cobrar retorno ao galpão"
-      });
-    }
+    if (foiBipado) return;
+    if (rotaCriadaHoje) return;
+
+    resultadoFinal.push({
+      "Código do volume": volume,
+      "Pedido": pedido,
+      "NF": nf,
+      "Nome Entregador": entregador,
+      "CPF Entregador": cpfEntregador,
+      "Data da Rota": dataRota,
+      "Rota criada hoje": rotaCriadaHoje ? "Sim" : "Não",
+      "Status": status,
+      "Motivo": motivo,
+      "Destino": destino,
+      "Bairro": bairro,
+      "Cidade": cidade,
+      "Ação": "Carga no piso - sem rota criada hoje"
+    });
   });
 
   document.getElementById("totalPlanilha").innerText = dados.length;
@@ -277,8 +296,20 @@ async function analisar() {
 
   const considerados = dados.filter(linha => {
     const status = normalizarTexto(encontrarCampo(linha, ["Status"]));
-    const volume = limparCodigo(encontrarCampo(linha, ["Código do volume", "Codigo do volume", "Volume"]));
-    return volume && !statusIgnorar.includes(status);
+    const volume = limparCodigo(
+      encontrarCampo(linha, [
+        "Código do volume",
+        "Codigo do volume",
+        "Volume",
+        "Codigo Volume",
+        "Código Volume"
+      ])
+    );
+
+    const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
+    const rotaCriadaHoje = temRotaCriadaHoje(dataRota);
+
+    return volume && !statusIgnorar.includes(status) && !rotaCriadaHoje;
   });
 
   document.getElementById("totalConsiderados").innerText = considerados.length;
@@ -292,7 +323,7 @@ function montarTabelaResultado() {
   const div = document.getElementById("resultado");
 
   if (resultadoFinal.length === 0) {
-    div.innerHTML = "<p class='ok'>Todos os volumes considerados aparecem no WhatsApp.</p>";
+    div.innerHTML = "<p class='ok'>Nenhuma carga no piso sem rota criada hoje.</p>";
     return;
   }
 
@@ -305,6 +336,7 @@ function montarTabelaResultado() {
           <th>NF</th>
           <th>Entregador</th>
           <th>Data da Rota</th>
+          <th>Rota criada hoje</th>
           <th>Status</th>
           <th>Motivo</th>
           <th>Bairro</th>
@@ -323,6 +355,7 @@ function montarTabelaResultado() {
         <td>${item["NF"]}</td>
         <td>${item["Nome Entregador"]}</td>
         <td>${item["Data da Rota"]}</td>
+        <td>${item["Rota criada hoje"]}</td>
         <td>${item["Status"]}</td>
         <td>${item["Motivo"]}</td>
         <td>${item["Bairro"]}</td>
@@ -340,7 +373,7 @@ function montarResumoEntregador() {
   const div = document.getElementById("resumoEntregador");
 
   if (resultadoFinal.length === 0) {
-    div.innerHTML = "<p class='ok'>Nenhum entregador com pendência de retorno.</p>";
+    div.innerHTML = "<p class='ok'>Nenhum entregador com carga no piso.</p>";
     return;
   }
 
@@ -356,7 +389,7 @@ function montarResumoEntregador() {
       <thead>
         <tr>
           <th>Entregador</th>
-          <th>Volumes não retornados</th>
+          <th>Cargas no piso</th>
         </tr>
       </thead>
       <tbody>
@@ -386,9 +419,9 @@ function exportarExcel() {
   const ws = XLSX.utils.json_to_sheet(resultadoFinal);
   const wb = XLSX.utils.book_new();
 
-  XLSX.utils.book_append_sheet(wb, ws, "Nao Retornaram");
+  XLSX.utils.book_append_sheet(wb, ws, "Cargas no Piso");
 
-  XLSX.writeFile(wb, "controle_retornos_nao_bipados.xlsx");
+  XLSX.writeFile(wb, "cargas_no_piso_sem_rota_hoje.xlsx");
 }
 </script>
 
