@@ -1,4 +1,6 @@
-<!DOCTYPE html>
+from pathlib import Path
+
+code = r'''<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
@@ -142,20 +144,45 @@
   <script>
     let resultadoFinal = [];
 
-  const statusIgnorar = [
-  "fechado",
-  "fechada",
-  "planejada",
-  "aceita",
-  "em rota"
-];
-
     function normalizarTexto(valor) {
       return String(valor || "")
         .toLowerCase()
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
         .trim();
+    }
+
+    function deveConsiderarStatus(status) {
+      const statusNormalizado = normalizarTexto(status);
+
+      // "Aceita" significa que já existe rota criada e nunca deve entrar.
+      if (statusNormalizado.includes("aceita")) {
+        return false;
+      }
+
+      // Considera somente insucesso.
+      if (statusNormalizado.includes("insucesso")) {
+        return true;
+      }
+
+      // Status vazio representa volume sem rota criada.
+      if (statusNormalizado === "") {
+        return true;
+      }
+
+      // Também aceita descrições explícitas de ausência de rota.
+      const statusSemRota = [
+        "nao tem rota criada",
+        "sem rota criada",
+        "rota nao criada",
+        "nao roteirizado",
+        "sem rota"
+      ];
+
+      return statusSemRota.some(texto =>
+        statusNormalizado.includes(texto)
+      );
     }
 
     function limparCodigo(valor) {
@@ -221,82 +248,87 @@
         return;
       }
 
-      const dados = await lerPlanilha(arquivo);
-      const codigosBipados = extrairCodigosWhatsApp(textoWhatsApp);
+      try {
+        const dados = await lerPlanilha(arquivo);
+        const codigosBipados = extrairCodigosWhatsApp(textoWhatsApp);
 
-      resultadoFinal = [];
+        resultadoFinal = [];
 
-      dados.forEach(linha => {
-        const status = encontrarCampo(linha, ["Status"]);
-        const statusNormalizado = normalizarTexto(status);
+        dados.forEach(linha => {
+          const status = encontrarCampo(linha, ["Status"]);
 
-        const volume = limparCodigo(
-          encontrarCampo(linha, [
-            "Código do volume",
-            "Codigo do volume",
-            "Volume",
-            "Codigo Volume",
-            "Código Volume"
-          ])
-        );
+          const volume = limparCodigo(
+            encontrarCampo(linha, [
+              "Código do volume",
+              "Codigo do volume",
+              "Volume",
+              "Codigo Volume",
+              "Código Volume"
+            ])
+          );
 
-        const pedido = encontrarCampo(linha, ["Pedido"]);
-        const nf = encontrarCampo(linha, ["NF"]);
-        const entregador = encontrarCampo(linha, ["Nome Entregador", "Entregador"]);
-        const cpfEntregador = encontrarCampo(linha, ["CPF Entregador", "CPF"]);
-        const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
-        const motivo = encontrarCampo(linha, ["Motivo"]);
-        const destino = encontrarCampo(linha, ["Destino"]);
-        const bairro = encontrarCampo(linha, ["Bairro"]);
-        const cidade = encontrarCampo(linha, ["Cidade"]);
+          const pedido = encontrarCampo(linha, ["Pedido"]);
+          const nf = encontrarCampo(linha, ["NF"]);
+          const entregador = encontrarCampo(linha, ["Nome Entregador", "Entregador"]);
+          const cpfEntregador = encontrarCampo(linha, ["CPF Entregador", "CPF"]);
+          const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
+          const motivo = encontrarCampo(linha, ["Motivo"]);
+          const destino = encontrarCampo(linha, ["Destino"]);
+          const bairro = encontrarCampo(linha, ["Bairro"]);
+          const cidade = encontrarCampo(linha, ["Cidade"]);
 
-        if (!volume) return;
+          if (!volume) return;
 
-        if (statusIgnorar.includes(statusNormalizado)) return;
+          if (!deveConsiderarStatus(status)) return;
 
-        const foiBipado = codigosBipados.has(volume);
+          const foiBipado = codigosBipados.has(volume);
 
-        if (!foiBipado) {
-          resultadoFinal.push({
-            "Código do volume": volume,
-            "Pedido": pedido,
-            "NF": nf,
-            "Nome Entregador": entregador,
-            "CPF Entregador": cpfEntregador,
-            "Data da Rota": dataRota,
-            "Status": status,
-            "Motivo": motivo,
-            "Destino": destino,
-            "Bairro": bairro,
-            "Cidade": cidade,
-            "Ação": "Cobrar retorno ao galpão"
-          });
-        }
-      });
+          if (!foiBipado) {
+            resultadoFinal.push({
+              "Código do volume": volume,
+              "Pedido": pedido,
+              "NF": nf,
+              "Nome Entregador": entregador,
+              "CPF Entregador": cpfEntregador,
+              "Data da Rota": dataRota,
+              "Status": status || "Sem rota criada",
+              "Motivo": motivo,
+              "Destino": destino,
+              "Bairro": bairro,
+              "Cidade": cidade,
+              "Ação": "Cobrar retorno ao galpão"
+            });
+          }
+        });
 
-      document.getElementById("totalPlanilha").innerText = dados.length;
-      document.getElementById("totalBipados").innerText = codigosBipados.size;
+        document.getElementById("totalPlanilha").innerText = dados.length;
+        document.getElementById("totalBipados").innerText = codigosBipados.size;
 
-      const considerados = dados.filter(linha => {
-        const status = normalizarTexto(encontrarCampo(linha, ["Status"]));
-        const volume = limparCodigo(
-          encontrarCampo(linha, [
-            "Código do volume",
-            "Codigo do volume",
-            "Volume",
-            "Codigo Volume",
-            "Código Volume"
-          ])
-        );
+        const considerados = dados.filter(linha => {
+          const status = encontrarCampo(linha, ["Status"]);
 
-        return volume && !statusIgnorar.includes(status);
-      });
+          const volume = limparCodigo(
+            encontrarCampo(linha, [
+              "Código do volume",
+              "Codigo do volume",
+              "Volume",
+              "Codigo Volume",
+              "Código Volume"
+            ])
+          );
 
-      document.getElementById("totalConsiderados").innerText = considerados.length;
-      document.getElementById("totalNaoRetornaram").innerText = resultadoFinal.length;
+          return volume && deveConsiderarStatus(status);
+        });
 
-      montarTabelaResultado();
-      montarResumoEntregador();
+        document.getElementById("totalConsiderados").innerText = considerados.length;
+        document.getElementById("totalNaoRetornaram").innerText = resultadoFinal.length;
+
+        montarTabelaResultado();
+        montarResumoEntregador();
+      } catch (erro) {
+        console.error(erro);
+        alert("Não foi possível analisar a planilha. Verifique o arquivo e tente novamente.");
+      }
     }
 
     function montarTabelaResultado() {
@@ -412,3 +444,9 @@
 
 </body>
 </html>
+'''
+
+path = Path("/mnt/data/controle_retornos_codigo_completo.html")
+path.write_text(code, encoding="utf-8")
+print(path)
+
