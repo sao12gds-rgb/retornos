@@ -1,21 +1,194 @@
-from pathlib import Path
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Controle de Retornos</title>
 
-src = Path("/mnt/data/controle_retornos_codigo_completo.html")
-if not src.exists():
-    raise FileNotFoundError(src)
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
-html = src.read_text(encoding="utf-8")
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 20px;
+      color: #222;
+    }
 
-start = html.index("    function deveConsiderarStatus(status) {")
-end = html.index("\n\n    function limparCodigo", start)
+    h1 {
+      margin-bottom: 5px;
+    }
 
-new_functions = r'''    function converterDataPlanilha(valor) {
-      if (valor === null || valor === undefined || valor === "") {
+    .card {
+      background: white;
+      padding: 18px;
+      border-radius: 10px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    label {
+      font-weight: bold;
+      display: block;
+      margin-top: 12px;
+      margin-bottom: 6px;
+    }
+
+    input, textarea, button {
+      width: 100%;
+      padding: 10px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+
+    textarea {
+      height: 160px;
+      resize: vertical;
+    }
+
+    button {
+      margin-top: 14px;
+      border: none;
+      background: #004aad;
+      color: white;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #00347a;
+    }
+
+    .resumo {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .box {
+      background: #eef3ff;
+      padding: 14px;
+      border-radius: 8px;
+      font-weight: bold;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #004aad;
+      color: white;
+      position: sticky;
+      top: 0;
+    }
+
+    .erro {
+      color: #b00020;
+      font-weight: bold;
+    }
+
+    .ok {
+      color: #0a7a28;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Controle de Retornos ao Galpão</h1>
+  <p>
+    Identifica insucessos de dias anteriores, ainda sem nova rota,
+    que não aparecem nos bipes enviados pelo WhatsApp.
+  </p>
+
+  <div class="card">
+    <label>Planilha da rota / insucessos</label>
+    <input type="file" id="arquivoPlanilha" accept=".xlsx,.xls" />
+
+    <label>Cole aqui os códigos bipados no WhatsApp</label>
+    <textarea
+      id="codigosWhatsApp"
+      placeholder="Cole aqui o texto ou os códigos do WhatsApp"
+    ></textarea>
+
+    <button onclick="analisar()">Analisar Retornos</button>
+    <button onclick="exportarExcel()">Exportar Resultado</button>
+  </div>
+
+  <div class="card resumo">
+    <div class="box">
+      Total na planilha:
+      <span id="totalPlanilha">0</span>
+    </div>
+
+    <div class="box">
+      Considerados na análise:
+      <span id="totalConsiderados">0</span>
+    </div>
+
+    <div class="box">
+      Bipados no WhatsApp:
+      <span id="totalBipados">0</span>
+    </div>
+
+    <div class="box">
+      Não retornaram:
+      <span id="totalNaoRetornaram">0</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Resumo por Entregador</h2>
+    <div id="resumoEntregador"></div>
+  </div>
+
+  <div class="card">
+    <h2>Volumes que NÃO aparecem no WhatsApp</h2>
+    <div id="resultado"></div>
+  </div>
+
+  <script>
+    let resultadoFinal = [];
+
+    function normalizarTexto(valor) {
+      return String(valor || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function converterDataPlanilha(valor) {
+      if (
+        valor === null ||
+        valor === undefined ||
+        valor === ""
+      ) {
         return null;
       }
 
-      // Quando o Excel entrega a data como número serial.
-      if (typeof valor === "number" && Number.isFinite(valor)) {
+      /*
+        Quando o Excel envia a data como número serial.
+        Exemplo: 45850.
+      */
+      if (
+        typeof valor === "number" &&
+        Number.isFinite(valor)
+      ) {
         const dataExcel = XLSX.SSF.parse_date_code(valor);
 
         if (!dataExcel) {
@@ -29,8 +202,13 @@ new_functions = r'''    function converterDataPlanilha(valor) {
         );
       }
 
-      // Quando a biblioteca já entrega um objeto Date.
-      if (valor instanceof Date && !isNaN(valor.getTime())) {
+      /*
+        Quando o valor já chega como objeto Date.
+      */
+      if (
+        valor instanceof Date &&
+        !isNaN(valor.getTime())
+      ) {
         return new Date(
           valor.getFullYear(),
           valor.getMonth(),
@@ -40,7 +218,11 @@ new_functions = r'''    function converterDataPlanilha(valor) {
 
       const texto = String(valor).trim();
 
-      // Formato brasileiro: DD/MM/AAAA ou DD-MM-AAAA.
+      /*
+        Formatos aceitos:
+        DD/MM/AAAA
+        DD-MM-AAAA
+      */
       const formatoBrasileiro = texto.match(
         /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/
       );
@@ -50,34 +232,49 @@ new_functions = r'''    function converterDataPlanilha(valor) {
         const mes = Number(formatoBrasileiro[2]) - 1;
         const ano = Number(formatoBrasileiro[3]);
 
-        const data = new Date(ano, mes, dia);
+        const data = new Date(
+          ano,
+          mes,
+          dia
+        );
 
-        if (
+        const dataValida =
           data.getFullYear() === ano &&
           data.getMonth() === mes &&
-          data.getDate() === dia
-        ) {
+          data.getDate() === dia;
+
+        if (dataValida) {
           return data;
         }
 
         return null;
       }
 
-      // Formato ISO: AAAA-MM-DD.
-      const formatoIso = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      /*
+        Formato aceito:
+        AAAA-MM-DD
+      */
+      const formatoIso = texto.match(
+        /^(\d{4})-(\d{1,2})-(\d{1,2})/
+      );
 
       if (formatoIso) {
         const ano = Number(formatoIso[1]);
         const mes = Number(formatoIso[2]) - 1;
         const dia = Number(formatoIso[3]);
 
-        const data = new Date(ano, mes, dia);
+        const data = new Date(
+          ano,
+          mes,
+          dia
+        );
 
-        if (
+        const dataValida =
           data.getFullYear() === ano &&
           data.getMonth() === mes &&
-          data.getDate() === dia
-        ) {
+          data.getDate() === dia;
+
+        if (dataValida) {
           return data;
         }
 
@@ -90,54 +287,523 @@ new_functions = r'''    function converterDataPlanilha(valor) {
     function deveConsiderarNaAnalise(status, dataRota) {
       const statusNormalizado = normalizarTexto(status);
 
-      // Considera somente registros que continuam com status de insucesso.
-      // Se recebeu nova rota, o status já será Aceita, Planejada, Em rota etc.
+      /*
+        Somente status com a palavra "insucesso" entra.
+        Portanto, Aceita, Planejada, Em rota, Fechado
+        e qualquer outro status ficam automaticamente fora.
+      */
       if (!statusNormalizado.includes("insucesso")) {
         return false;
       }
 
-      const dataDoInsucesso = converterDataPlanilha(dataRota);
+      const dataDoInsucesso =
+        converterDataPlanilha(dataRota);
 
-      // Sem data não entra, pois não existe evidência de que seja de dia anterior.
+      /*
+        Sem data não entra, pois não existe evidência
+        de que seja de um dia anterior.
+      */
       if (!dataDoInsucesso) {
         return false;
       }
 
       const hoje = new Date();
-      hoje.setHours(0, 0, 0, 0);
 
-      dataDoInsucesso.setHours(0, 0, 0, 0);
+      hoje.setHours(
+        0,
+        0,
+        0,
+        0
+      );
 
-      // Insucesso do dia atual não entra.
-      // Somente insucessos de dias anteriores são considerados.
+      dataDoInsucesso.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      /*
+        Insucesso do dia atual:
+        não entra.
+
+        Insucesso anterior a hoje:
+        entra.
+      */
       return dataDoInsucesso < hoje;
-    }'''
+    }
 
-html = html[:start] + new_functions + html[end:]
+    function limparCodigo(valor) {
+      return String(valor || "")
+        .replace(/\D/g, "")
+        .trim();
+    }
 
-html = html.replace(
-    '          if (!deveConsiderarStatus(status)) return;',
-    '          if (!deveConsiderarNaAnalise(status, dataRota)) return;'
-)
+    function extrairCodigosWhatsApp(texto) {
+      const encontrados =
+        texto.match(/\b\d{10,20}\b/g) || [];
 
-old_considered = '''          return volume && deveConsiderarStatus(status);'''
-new_considered = '''          const dataRota = encontrarCampo(linha, ["Data da Rota", "Data Rota"]);
+      return new Set(
+        encontrados.map(codigo =>
+          limparCodigo(codigo)
+        )
+      );
+    }
 
-          return volume && deveConsiderarNaAnalise(status, dataRota);'''
-html = html.replace(old_considered, new_considered)
+    function lerPlanilha(arquivo) {
+      return new Promise((resolve, reject) => {
+        const leitor = new FileReader();
 
-# Update explanatory paragraph slightly, preserving layout.
-html = html.replace(
-    '<p>Identifica volumes da planilha que não aparecem nos bipes enviados pelo WhatsApp.</p>',
-    '<p>Identifica insucessos de dias anteriores, ainda sem nova rota, que não aparecem nos bipes enviados pelo WhatsApp.</p>'
-)
+        leitor.onload = function(e) {
+          try {
+            const dados =
+              new Uint8Array(e.target.result);
 
-out = Path("/mnt/data/controle_retornos_insucessos_anteriores.html")
-out.write_text(html, encoding="utf-8")
+            const workbook = XLSX.read(
+              dados,
+              {
+                type: "array"
+              }
+            );
 
-# Basic sanity checks
-assert "deveConsiderarNaAnalise(status, dataRota)" in html
-assert "return dataDoInsucesso < hoje;" in html
-assert html.strip().endswith("</html>")
+            const primeiraAba =
+              workbook.SheetNames[0];
 
-print(out)
+            const planilha =
+              workbook.Sheets[primeiraAba];
+
+            const json =
+              XLSX.utils.sheet_to_json(
+                planilha,
+                {
+                  defval: ""
+                }
+              );
+
+            resolve(json);
+          } catch (erro) {
+            reject(erro);
+          }
+        };
+
+        leitor.onerror = reject;
+
+        leitor.readAsArrayBuffer(arquivo);
+      });
+    }
+
+    function encontrarCampo(
+      linha,
+      nomesPossiveis
+    ) {
+      const chaves = Object.keys(linha);
+
+      for (const nome of nomesPossiveis) {
+        const encontrado = chaves.find(chave =>
+          normalizarTexto(chave) ===
+          normalizarTexto(nome)
+        );
+
+        if (encontrado) {
+          return linha[encontrado];
+        }
+      }
+
+      return "";
+    }
+
+    async function analisar() {
+      const arquivo =
+        document
+          .getElementById("arquivoPlanilha")
+          .files[0];
+
+      const textoWhatsApp =
+        document
+          .getElementById("codigosWhatsApp")
+          .value;
+
+      if (!arquivo) {
+        alert("Selecione a planilha primeiro.");
+        return;
+      }
+
+      if (!textoWhatsApp.trim()) {
+        alert(
+          "Cole os códigos bipados do WhatsApp."
+        );
+        return;
+      }
+
+      try {
+        const dados =
+          await lerPlanilha(arquivo);
+
+        const codigosBipados =
+          extrairCodigosWhatsApp(
+            textoWhatsApp
+          );
+
+        resultadoFinal = [];
+
+        dados.forEach(linha => {
+          const status =
+            encontrarCampo(
+              linha,
+              ["Status"]
+            );
+
+          const volume =
+            limparCodigo(
+              encontrarCampo(
+                linha,
+                [
+                  "Código do volume",
+                  "Codigo do volume",
+                  "Volume",
+                  "Codigo Volume",
+                  "Código Volume"
+                ]
+              )
+            );
+
+          const pedido =
+            encontrarCampo(
+              linha,
+              ["Pedido"]
+            );
+
+          const nf =
+            encontrarCampo(
+              linha,
+              ["NF"]
+            );
+
+          const entregador =
+            encontrarCampo(
+              linha,
+              [
+                "Nome Entregador",
+                "Entregador"
+              ]
+            );
+
+          const cpfEntregador =
+            encontrarCampo(
+              linha,
+              [
+                "CPF Entregador",
+                "CPF"
+              ]
+            );
+
+          const dataRota =
+            encontrarCampo(
+              linha,
+              [
+                "Data da Rota",
+                "Data Rota"
+              ]
+            );
+
+          const motivo =
+            encontrarCampo(
+              linha,
+              ["Motivo"]
+            );
+
+          const destino =
+            encontrarCampo(
+              linha,
+              ["Destino"]
+            );
+
+          const bairro =
+            encontrarCampo(
+              linha,
+              ["Bairro"]
+            );
+
+          const cidade =
+            encontrarCampo(
+              linha,
+              ["Cidade"]
+            );
+
+          if (!volume) {
+            return;
+          }
+
+          if (
+            !deveConsiderarNaAnalise(
+              status,
+              dataRota
+            )
+          ) {
+            return;
+          }
+
+          const foiBipado =
+            codigosBipados.has(volume);
+
+          if (!foiBipado) {
+            resultadoFinal.push({
+              "Código do volume": volume,
+              "Pedido": pedido,
+              "NF": nf,
+              "Nome Entregador": entregador,
+              "CPF Entregador": cpfEntregador,
+              "Data da Rota": dataRota,
+              "Status": status,
+              "Motivo": motivo,
+              "Destino": destino,
+              "Bairro": bairro,
+              "Cidade": cidade,
+              "Ação":
+                "Cobrar retorno ao galpão"
+            });
+          }
+        });
+
+        document
+          .getElementById("totalPlanilha")
+          .innerText = dados.length;
+
+        document
+          .getElementById("totalBipados")
+          .innerText = codigosBipados.size;
+
+        const considerados =
+          dados.filter(linha => {
+            const status =
+              encontrarCampo(
+                linha,
+                ["Status"]
+              );
+
+            const volume =
+              limparCodigo(
+                encontrarCampo(
+                  linha,
+                  [
+                    "Código do volume",
+                    "Codigo do volume",
+                    "Volume",
+                    "Codigo Volume",
+                    "Código Volume"
+                  ]
+                )
+              );
+
+            const dataRota =
+              encontrarCampo(
+                linha,
+                [
+                  "Data da Rota",
+                  "Data Rota"
+                ]
+              );
+
+            return (
+              volume &&
+              deveConsiderarNaAnalise(
+                status,
+                dataRota
+              )
+            );
+          });
+
+        document
+          .getElementById(
+            "totalConsiderados"
+          )
+          .innerText =
+            considerados.length;
+
+        document
+          .getElementById(
+            "totalNaoRetornaram"
+          )
+          .innerText =
+            resultadoFinal.length;
+
+        montarTabelaResultado();
+        montarResumoEntregador();
+
+      } catch (erro) {
+        console.error(erro);
+
+        alert(
+          "Não foi possível analisar a planilha. Verifique o arquivo e tente novamente."
+        );
+      }
+    }
+
+    function montarTabelaResultado() {
+      const div =
+        document.getElementById(
+          "resultado"
+        );
+
+      if (resultadoFinal.length === 0) {
+        div.innerHTML =
+          "<p class='ok'>Todos os volumes considerados aparecem no WhatsApp.</p>";
+
+        return;
+      }
+
+      let html = `
+        <table>
+          <thead>
+            <tr>
+              <th>Código do volume</th>
+              <th>Pedido</th>
+              <th>NF</th>
+              <th>Entregador</th>
+              <th>Data da Rota</th>
+              <th>Status</th>
+              <th>Motivo</th>
+              <th>Bairro</th>
+              <th>Cidade</th>
+              <th>Ação</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      resultadoFinal.forEach(item => {
+        html += `
+          <tr>
+            <td>
+              ${item["Código do volume"]}
+            </td>
+            <td>
+              ${item["Pedido"]}
+            </td>
+            <td>
+              ${item["NF"]}
+            </td>
+            <td>
+              ${item["Nome Entregador"]}
+            </td>
+            <td>
+              ${item["Data da Rota"]}
+            </td>
+            <td>
+              ${item["Status"]}
+            </td>
+            <td>
+              ${item["Motivo"]}
+            </td>
+            <td>
+              ${item["Bairro"]}
+            </td>
+            <td>
+              ${item["Cidade"]}
+            </td>
+            <td>
+              ${item["Ação"]}
+            </td>
+          </tr>
+        `;
+      });
+
+      html += `
+          </tbody>
+        </table>
+      `;
+
+      div.innerHTML = html;
+    }
+
+    function montarResumoEntregador() {
+      const div =
+        document.getElementById(
+          "resumoEntregador"
+        );
+
+      if (resultadoFinal.length === 0) {
+        div.innerHTML =
+          "<p class='ok'>Nenhum entregador com pendência de retorno.</p>";
+
+        return;
+      }
+
+      const resumo = {};
+
+      resultadoFinal.forEach(item => {
+        const nome =
+          item["Nome Entregador"] ||
+          "Sem entregador";
+
+        resumo[nome] =
+          (resumo[nome] || 0) + 1;
+      });
+
+      let html = `
+        <table>
+          <thead>
+            <tr>
+              <th>Entregador</th>
+              <th>Volumes não retornados</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      Object.entries(resumo)
+        .sort(
+          (a, b) =>
+            b[1] - a[1]
+        )
+        .forEach(
+          ([entregador, total]) => {
+            html += `
+              <tr>
+                <td>${entregador}</td>
+                <td>${total}</td>
+              </tr>
+            `;
+          }
+        );
+
+      html += `
+          </tbody>
+        </table>
+      `;
+
+      div.innerHTML = html;
+    }
+
+    function exportarExcel() {
+      if (resultadoFinal.length === 0) {
+        alert(
+          "Não há resultado para exportar."
+        );
+
+        return;
+      }
+
+      const ws =
+        XLSX.utils.json_to_sheet(
+          resultadoFinal
+        );
+
+      const wb =
+        XLSX.utils.book_new();
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        ws,
+        "Nao Retornaram"
+      );
+
+      XLSX.writeFile(
+        wb,
+        "controle_retornos_nao_bipados.xlsx"
+      );
+    }
+  </script>
+
+</body>
+</html>
